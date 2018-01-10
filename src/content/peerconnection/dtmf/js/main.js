@@ -62,7 +62,20 @@ function gotStream(stream) {
   if (audioTracks.length > 0) {
     trace('Using Audio device: ' + audioTracks[0].label);
   }
-  pc1.addStream(localStream);
+  if (adapter.browserDetails.browser !== 'chrome') {
+    localStream.getTracks().forEach(
+      function(track) {
+        pc1.addTrack(
+          track,
+          localStream
+        );
+      }
+    );
+  } else {
+    // TODO: https://github.com/webrtc/adapter/issues/733
+    // chrome does not yet support addTrack + dtmf
+    pc1.addStream(localStream);
+  }
   trace('Adding Local Stream to peer connection');
   pc1.createOffer(
     offerOptions
@@ -92,7 +105,7 @@ function call() {
   pc2.onicecandidate = function(e) {
     onIceCandidate(pc2, e);
   };
-  pc2.onaddstream = gotRemoteStream;
+  pc2.ontrack = gotRemoteStream;
 
   trace('Requesting local stream');
   navigator.mediaDevices.getUserMedia({
@@ -143,30 +156,32 @@ function hangup() {
 }
 
 function gotRemoteStream(e) {
-  audio.srcObject = e.stream;
-  trace('Received remote stream');
+  if (audio.srcObject !== e.streams[0]) {
+    audio.srcObject = e.streams[0];
+    trace('Received remote stream');
 
-  if (!pc1.getSenders) {
-    alert('This demo requires the RTCPeerConnection method getSenders() ' +
-          'which is not support by this browser.');
-    return;
+    if (!pc1.getSenders) {
+      alert('This demo requires the RTCPeerConnection method getSenders() ' +
+            'which is not support by this browser.');
+      return;
+    }
+    var senders = pc1.getSenders();
+    var audioSender = senders.find(function(sender) {
+      return sender.track && sender.track.kind === 'audio';
+    });
+    if (!audioSender) {
+      trace('No local audio track to send DTMF with\n');
+      return;
+    }
+    if (!audioSender.dtmf) {
+      alert('This demo requires DTMF which is not support by this browser.');
+      return;
+    }
+    dtmfSender = audioSender.dtmf;
+    dtmfStatusDiv.textContent = 'DTMF available';
+    trace('Got DTMFSender\n');
+    dtmfSender.ontonechange = dtmfOnToneChange;
   }
-  var senders = pc1.getSenders();
-  var audioSender = senders.find(function(sender) {
-    return sender.track && sender.track.kind === 'audio';
-  });
-  if (!audioSender) {
-    trace('No local audio track to send DTMF with\n');
-    return;
-  }
-  if (!audioSender.dtmf) {
-    alert('This demo requires DTMF which is not support by this browser.');
-    return;
-  }
-  dtmfSender = audioSender.dtmf;
-  dtmfStatusDiv.textContent = 'DTMF available';
-  trace('Got DTMFSender\n');
-  dtmfSender.ontonechange = dtmfOnToneChange;
 }
 
 function getOtherPc(pc) {

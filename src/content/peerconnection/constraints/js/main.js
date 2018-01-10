@@ -143,7 +143,14 @@ function createPeerConnection() {
   timestampPrev = 0;
   localPeerConnection = new RTCPeerConnection(null);
   remotePeerConnection = new RTCPeerConnection(null);
-  localPeerConnection.addStream(localStream);
+  localStream.getTracks().forEach(
+    function(track) {
+      localPeerConnection.addTrack(
+        track,
+        localStream
+      );
+    }
+  );
   console.log('localPeerConnection creating offer');
   localPeerConnection.onnegotiationeeded = function() {
     console.log('Negotiation needed - localPeerConnection');
@@ -167,9 +174,11 @@ function createPeerConnection() {
       onAddIceCandidateError
     );
   };
-  remotePeerConnection.onaddstream = function(e) {
-    console.log('remotePeerConnection got stream');
-    remoteVideo.srcObject = e.stream;
+  remotePeerConnection.ontrack = function(e) {
+    if (remoteVideo.srcObject !== e.streams[0]) {
+      console.log('remotePeerConnection got stream');
+      remoteVideo.srcObject = e.streams[0];
+    }
   };
   localPeerConnection.createOffer().then(
     function(desc) {
@@ -203,7 +212,7 @@ function onAddIceCandidateError(error) {
 
 // Display statistics
 setInterval(function() {
-  if (remotePeerConnection && remotePeerConnection.getRemoteStreams()[0]) {
+  if (localPeerConnection && remotePeerConnection) {
     remotePeerConnection.getStats(null)
     .then(function(results) {
       var statsString = dumpStats(results);
@@ -238,22 +247,35 @@ setInterval(function() {
       var activeCandidatePair = null;
       var remoteCandidate = null;
 
-      // search for the candidate pair
+      // Search for the candidate pair, spec-way first.
       results.forEach(function(report) {
-        if (report.type === 'candidatepair' && report.selected ||
-            report.type === 'googCandidatePair' &&
-            report.googActiveConnection === 'true') {
-          activeCandidatePair = report;
+        if (report.type === 'transport') {
+          activeCandidatePair = results.get(report.selectedCandidatePairId);
         }
       });
-      if (activeCandidatePair && activeCandidatePair.remoteCandidateId) {
-        remoteCandidate = results[activeCandidatePair.remoteCandidateId];
+      // Fallback for Firefox and Chrome legacy stats.
+      if (!activeCandidatePair) {
+        results.forEach(function(report) {
+          if (report.type === 'candidate-pair' && report.selected ||
+              report.type === 'googCandidatePair' &&
+              report.googActiveConnection === 'true') {
+            activeCandidatePair = report;
+          }
+        });
       }
-      if (remoteCandidate && remoteCandidate.ipAddress &&
-          remoteCandidate.portNumber) {
-        peerDiv.innerHTML = '<strong>Connected to:</strong> ' +
-            remoteCandidate.ipAddress +
-            ':' + remoteCandidate.portNumber;
+      if (activeCandidatePair && activeCandidatePair.remoteCandidateId) {
+        remoteCandidate = results.get(activeCandidatePair.remoteCandidateId);
+      }
+      if (remoteCandidate) {
+        if (remoteCandidate.ip && remoteCandidate.port) {
+          peerDiv.innerHTML = '<strong>Connected to:</strong> ' +
+              remoteCandidate.ip + ':' + remoteCandidate.port;
+        } else if (remoteCandidate.ipAddress && remoteCandidate.portNumber) {
+          // Fall back to old names.
+          peerDiv.innerHTML = '<strong>Connected to:</strong> ' +
+              remoteCandidate.ipAddress +
+              ':' + remoteCandidate.portNumber;
+        }
       }
     }, function(err) {
       console.log(err);

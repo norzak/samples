@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2016 The WebRTC project authors. All Rights Reserved.
+ *  Copyright (c) 2017 The WebRTC project authors. All Rights Reserved.
  *
  *  Use of this source code is governed by a BSD-style license
  *  that can be found in the LICENSE file in the root of the source
@@ -15,47 +15,42 @@ var test = require('tape');
 var webdriver = require('selenium-webdriver');
 var seleniumHelpers = require('webrtc-utilities').seleniumLib;
 
-test('DTMF tones', function(t) {
+test('PeerConnection upgrade sample', function(t) {
   var driver = seleniumHelpers.buildDriver();
 
   driver.get((process.env.BASEURL ? process.env.BASEURL :
       ('file://' + process.cwd())) +
-      '/src/content/peerconnection/dtmf/index.html')
+      '/src/content/peerconnection/upgrade/index.html')
   .then(function() {
     t.pass('page loaded');
+    return driver.findElement(webdriver.By.id('startButton')).click();
+  })
+  .then(function() {
+    return driver.wait(function() {
+      return driver.executeScript('return localStream !== null');
+    }, 30 * 1000);
+  })
+  .then(function() {
+    t.pass('got media');
     return driver.findElement(webdriver.By.id('callButton')).click();
   })
   .then(function() {
     return driver.wait(function() {
       return driver.executeScript(
-          'return document.querySelector(\'#dtmfStatus\').innerHTML === ' +
-          '\'DTMF available\';');
+          'return pc2 && pc2.iceConnectionState === \'connected\';');
     }, 30 * 1000);
   })
   .then(function() {
-    t.pass('DTMF available');
-    // Set the tones to be sent.
-    return driver.executeScript(
-        'document.querySelector(\'#tones\').value = \'1#,9\'');
-  })
-  .then(function() {
-    return driver.findElement(webdriver.By.id('sendTonesButton')).click();
+    t.pass('pc2 ICE connected');
+    return driver.findElement(webdriver.By.id('upgradeButton')).click();
   })
   .then(function() {
     return driver.wait(function() {
       return driver.executeScript(
-        // For some reason the demo sends and extra space. Assume it's due to
-        // setting a gap.
-          'return document.querySelector(' +
-          '\'#sentTones\').innerHTML.length === 9');
-    });
-  }, 30 * 1000)
-  .then(function() {
-    return driver.executeScript(
-        'return document.querySelector(\'#sentTones\').innerHTML');
+          'return remoteVideo.videoWidth === 640;');
+    }, 30 * 1000);
   })
-  .then(function(sentTones) {
-    t.ok(sentTones === '1 # , 9  ', 'sentTones matches tones');
+  .then(function() {
     return driver.findElement(webdriver.By.id('hangupButton')).click();
   })
   .then(function() {
@@ -64,7 +59,7 @@ test('DTMF tones', function(t) {
     }, 30 * 1000);
   })
   .then(function() {
-    t.pass('Hangup successful');
+    t.pass('hangup');
     t.end();
   })
   .then(null, function(err) {

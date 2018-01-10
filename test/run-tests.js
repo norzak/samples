@@ -15,8 +15,14 @@ var test = require('tape');
 // Tests basic functionality of the the gum demo.
 require('../src/content/getusermedia/gum/js/test');
 
+// Tests basic functionality of the the resolution demo.
+require('../src/content/getusermedia/resolution/js/test');
+
 // Tests basic functionality of the pc1 demo.
 require('../src/content/peerconnection/pc1/js/test');
+
+// Tests basic functionality of the upgrade demo.
+require('../src/content/peerconnection/upgrade/js/test');
 
 // Tests basic functionality of the peerconnection audio demo.
 require('../src/content/peerconnection/audio/js/test');
@@ -51,9 +57,14 @@ require('../src/content/devices/input-output/js/test.js');
 // This is run as a test so it is executed after all tests
 // have completed.
 test('Shutdown', function(t) {
-  var driver = require('webrtc-utilities').seleniumLib.buildDriver();
-  driver.close()
-  .then(function() {
+  require('webrtc-utilities').seleniumLib.buildDriver()
+  .then(function(driver) {
+    driver.getCapabilities().then(function(caps) {
+      // Newer geckodriver do not like close() for some reason.
+      if (caps.get('browserName') !== 'firefox') {
+        driver.close();
+      }
+    });
     driver.quit().then(function() {
       t.end();
     });

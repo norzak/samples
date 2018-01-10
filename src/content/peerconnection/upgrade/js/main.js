@@ -1,25 +1,24 @@
 /*
- *  Copyright (c) 2016 The WebRTC project authors. All Rights Reserved.
+ *  Copyright (c) 2017 The WebRTC project authors. All Rights Reserved.
  *
  *  Use of this source code is governed by a BSD-style license
  *  that can be found in the LICENSE file in the root of the source
  *  tree.
  */
 
-/* globals StreamVisualizer */
-
 'use strict';
 
 var startButton = document.getElementById('startButton');
 var callButton = document.getElementById('callButton');
+var upgradeButton = document.getElementById('upgradeButton');
 var hangupButton = document.getElementById('hangupButton');
 callButton.disabled = true;
 hangupButton.disabled = true;
+upgradeButton.disabled = true;
 startButton.onclick = start;
 callButton.onclick = call;
+upgradeButton.onclick = upgrade;
 hangupButton.onclick = hangup;
-
-var canvas = document.querySelector('canvas');
 
 var startTime;
 var localVideo = document.getElementById('localVideo');
@@ -35,9 +34,10 @@ remoteVideo.addEventListener('loadedmetadata', function() {
     'px,  videoHeight: ' + this.videoHeight + 'px');
 });
 
-remoteVideo.addEventListener('resize', function() {
+remoteVideo.onresize = function() {
   trace('Remote video size changed to ' +
     remoteVideo.videoWidth + 'x' + remoteVideo.videoHeight);
+  console.warn('RESIZE', remoteVideo.videoWidth, remoteVideo.videoHeight);
   // We'll use the first onsize callback as an indication that video has started
   // playing out.
   if (startTime) {
@@ -45,14 +45,14 @@ remoteVideo.addEventListener('resize', function() {
     trace('Setup time: ' + elapsedTime.toFixed(3) + 'ms');
     startTime = null;
   }
-});
+};
 
 var localStream;
 var pc1;
 var pc2;
 var offerOptions = {
   offerToReceiveAudio: 1,
-  offerToReceiveVideo: 1
+  offerToReceiveVideo: 0
 };
 
 function getName(pc) {
@@ -75,7 +75,7 @@ function start() {
   startButton.disabled = true;
   navigator.mediaDevices.getUserMedia({
     audio: true,
-    video: true
+    video: false
   })
   .then(gotStream)
   .catch(function(e) {
@@ -85,14 +85,11 @@ function start() {
 
 function call() {
   callButton.disabled = true;
+  upgradeButton.disabled = false;
   hangupButton.disabled = false;
   trace('Starting call');
   startTime = window.performance.now();
-  var videoTracks = localStream.getVideoTracks();
   var audioTracks = localStream.getAudioTracks();
-  if (videoTracks.length > 0) {
-    trace('Using video device: ' + videoTracks[0].label);
-  }
   if (audioTracks.length > 0) {
     trace('Using audio device: ' + audioTracks[0].label);
   }
@@ -177,14 +174,12 @@ function onSetSessionDescriptionError(error) {
 }
 
 function gotRemoteStream(e) {
-  if (remoteVideo.srcObject !== e.streams[0]) {
-    remoteVideo.srcObject = e.streams[0];
-    trace('pc2 received remote stream');
-    var streamVisualizer = new StreamVisualizer(e.streams[0], canvas);
-    streamVisualizer.start();
-  }
-}
+  console.log('gotRemoteStream', e.track, e.streams[0]);
 
+  // reset srcObject to work around minor bugs in Chrome and Edge.
+  remoteVideo.srcObject = null;
+  remoteVideo.srcObject = e.streams[0];
+}
 
 function onCreateAnswerSuccess(desc) {
   trace('Answer from pc2:\n' + desc.sdp);
@@ -233,12 +228,55 @@ function onIceStateChange(pc, event) {
   }
 }
 
+function upgrade() {
+  upgradeButton.disabled = true;
+  navigator.mediaDevices.getUserMedia({video: true})
+  .then(function(stream) {
+    var videoTracks = stream.getVideoTracks();
+    if (videoTracks.length > 0) {
+      trace('Using video device: ' + videoTracks[0].label);
+    }
+    localStream.addTrack(videoTracks[0]);
+    localVideo.srcObject = null;
+    localVideo.srcObject = localStream;
+    pc1.addTrack(
+      videoTracks[0],
+      localStream
+    );
+    return pc1.createOffer();
+  })
+  .then(function(offer) {
+    return pc1.setLocalDescription(offer);
+  })
+  .then(function() {
+    return pc2.setRemoteDescription(pc1.localDescription);
+  })
+  .then(function() {
+    return pc2.createAnswer();
+  })
+  .then(function(answer) {
+    return pc2.setLocalDescription(answer);
+  })
+  .then(function() {
+    return pc1.setRemoteDescription(pc2.localDescription);
+  });
+}
+
 function hangup() {
   trace('Ending call');
   pc1.close();
   pc2.close();
   pc1 = null;
   pc2 = null;
+
+  var videoTracks = localStream.getVideoTracks();
+  videoTracks.forEach(function(videoTrack) {
+    videoTrack.stop();
+    localStream.removeTrack(videoTrack);
+  });
+  localVideo.srcObject = null;
+  localVideo.srcObject = localStream;
+
   hangupButton.disabled = true;
   callButton.disabled = false;
 }

@@ -40,7 +40,14 @@ function gotStream(stream) {
   trace('Received local stream');
   localStream = stream;
   localVideo.srcObject = stream;
-  pc1.addStream(localStream);
+  localStream.getTracks().forEach(
+    function(track) {
+      pc1.addTrack(
+        track,
+        localStream
+      );
+    }
+  );
   trace('Adding Local Stream to peer connection');
 
   pc1.createOffer(
@@ -78,7 +85,7 @@ function call() {
   pc2 = new RTCPeerConnection(servers, pcConstraints);
   trace('Created remote peer connection object pc2');
   pc2.onicecandidate = onIceCandidate.bind(pc2);
-  pc2.onaddstream = gotRemoteStream;
+  pc2.ontrack = gotRemoteStream;
 
   trace('Requesting local stream');
   navigator.mediaDevices.getUserMedia({
@@ -112,8 +119,10 @@ function gotDescription2(desc) {
   pc2.setLocalDescription(desc).then(
     function() {
       trace('Answer from pc2 \n' + desc.sdp);
-      desc.sdp = updateBandwidthRestriction(desc.sdp, '500');
-      pc1.setRemoteDescription(desc).then(
+      pc1.setRemoteDescription({
+        type: desc.type,
+        sdp: updateBandwidthRestriction(desc.sdp, '500')
+      }).then(
         function() {
         },
         onSetSessionDescriptionError
@@ -138,8 +147,10 @@ function hangup() {
 }
 
 function gotRemoteStream(e) {
-  remoteVideo.srcObject = e.stream;
-  trace('Received remote stream');
+  if (remoteVideo.srcObject !== e.streams[0]) {
+    remoteVideo.srcObject = e.streams[0];
+    trace('Received remote stream');
+  }
 }
 
 function getOtherPc(pc) {
@@ -177,12 +188,17 @@ bandwidthSelector.onchange = function() {
   bandwidthSelector.disabled = true;
   var bandwidth = bandwidthSelector.options[bandwidthSelector.selectedIndex]
       .value;
-  pc1.setLocalDescription(pc1.localDescription)
+  pc1.createOffer()
+  .then(function(offer) {
+    return pc1.setLocalDescription(offer);
+  })
   .then(function() {
-    var desc = pc1.remoteDescription;
-    desc.sdp = bandwidth === 'unlimited'
-             ? removeBandwidthRestriction(desc.sdp)
-             : updateBandwidthRestriction(desc.sdp, bandwidth);
+    var desc = {
+      type: pc1.remoteDescription.type,
+      sdp: bandwidth === 'unlimited'
+          ? removeBandwidthRestriction(pc1.remoteDescription.sdp)
+          : updateBandwidthRestriction(pc1.remoteDescription.sdp, bandwidth)
+    };
     trace('Applying bandwidth restriction to setRemoteDescription:\n' +
         desc.sdp);
     return pc1.setRemoteDescription(desc);
@@ -194,18 +210,24 @@ bandwidthSelector.onchange = function() {
 };
 
 function updateBandwidthRestriction(sdp, bandwidth) {
-  if (sdp.indexOf('b=AS:') === -1) {
-    // insert b=AS after c= line.
-    sdp = sdp.replace(/c=IN IP4 (.*)\r\n/,
-                      'c=IN IP4 $1\r\nb=AS:' + bandwidth + '\r\n');
+  var modifier = 'AS';
+  if (adapter.browserDetails.browser === 'firefox') {
+    bandwidth = (bandwidth >>> 0) * 1000;
+    modifier = 'TIAS';
+  }
+  if (sdp.indexOf('b=' + modifier + ':') === -1) {
+    // insert b= after c= line.
+    sdp = sdp.replace(/c=IN (.*)\r\n/,
+        'c=IN $1\r\nb=' + modifier + ':' + bandwidth + '\r\n');
   } else {
-    sdp = sdp.replace(/b=AS:.*\r\n/, 'b=AS:' + bandwidth + '\r\n');
+    sdp = sdp.replace(new RegExp('b=' + modifier + ':.*\r\n'),
+        'b=' + modifier + ':' + bandwidth + '\r\n');
   }
   return sdp;
 }
 
 function removeBandwidthRestriction(sdp) {
-  return sdp.replace(/b=AS:.*\r\n/, '');
+  return sdp.replace(/b=AS:.*\r\n/, '').replace(/b=TIAS:.*\r\n/, '');
 }
 
 // query getStats every second
